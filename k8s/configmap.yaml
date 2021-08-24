@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-configmap
+data:
+  ENDPOINT_CIAM: http://ciam-api-service.ciam-api-v1
+  ENDPOINT_PAYMENT: http://payment-api-service.payments-api-v1
+  ENDPOINT_PARKING: http://parking-api-service.parking-api-v1/

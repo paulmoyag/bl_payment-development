@@ -1,0 +1,79 @@
+stages:
+  - audit
+  - build 
+  - deploy
+
+DockerBuild:
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk
+  stage: build
+  environment: $CI_COMMIT_REF_NAME
+  only:
+    - development
+    - testing
+    - master
+  script:
+    - apt install jq -y
+    - VAULT_TOKEN=$(curl -X POST -H "Content-Type:application/json" -d '{"password":"'${VAULT_PASSWORD}'"}' -sS ${VAULT_SERVER}${VAULT_API_VERS}${VAULT_PATH_LOGIN_API}${VAULT_USER} | jq ".auth.client_token" -r)
+    - URL=${VAULT_SERVER}${VAULT_API_VERS}${VAULT_PATH}/data/${ENVIRONMENT}/sa/sa-container-admin
+    - curl -H "X-Vault-Token:${VAULT_TOKEN}" -X GET -sS ${URL} | jq ".data.data.file" -r | base64 -d > sa.json
+    - SA=`cat sa.json | jq -r '.client_email'`
+    - gcloud auth activate-service-account $SA --key-file=sa.json
+    - gcloud config set project $GCP_PROJECT_ID
+    - echo $VAULT_TOKEN
+    - gcloud auth configure-docker
+    - docker build -t gcr.io/$GCP_PROJECT_ID/${CI_PROJECT_NAME}:$CI_COMMIT_SHORT_SHA .
+    - docker push gcr.io/$GCP_PROJECT_ID/${CI_PROJECT_NAME}:$CI_COMMIT_SHORT_SHA
+    - docker images
+  tags:
+    - gitlab-shared-runners 
+    - docker
+
+DeployDev:
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk
+  stage: deploy
+  environment: $CI_COMMIT_REF_NAME
+  only:
+    - development
+  before_script:
+    - apt install jq -y
+    - VAULT_TOKEN=$(curl -X POST -H "Content-Type:application/json" -d '{"password":"'${VAULT_PASSWORD}'"}' -sS ${VAULT_SERVER}${VAULT_API_VERS}${VAULT_PATH_LOGIN_API}${VAULT_USER} | jq ".auth.client_token" -r)
+    - URL=${VAULT_SERVER}${VAULT_API_VERS}${VAULT_PATH}/data/${ENVIRONMENT}/sa/sa-container-admin
+    - curl -H "X-Vault-Token:${VAULT_TOKEN}" -X GET -sS ${URL} | jq ".data.data.file" -r | base64 -d > sa.json
+    - SA=`cat sa.json | jq -r '.client_email'`
+    - gcloud auth activate-service-account $SA --key-file=sa.json
+    - gcloud container clusters get-credentials ${K8_CLUSTER_NAME} --region ${K8_CLUSTER_REGION} --project ${GCP_PROJECT_ID}
+    - kubectl cluster-info
+  script:
+    - NAME_SPACE=bl-payment
+    - sed -i 's/CHANGENS/'"${NAME_SPACE}"'/g' k8s/namespace.json
+    - sed -i 's/CHANGEME/'"gcr.io\/"${GCP_PROJECT_ID}"\/${CI_PROJECT_NAME}:${CI_COMMIT_SHORT_SHA}"'/g' k8s/bl-payment.yaml
+    - kubectl apply --namespace=$NAME_SPACE -f k8s/namespace.json
+    - kubectl apply --namespace=$NAME_SPACE -f k8s/
+  tags:
+    - gitlab-shared-runners
+    - docker
+
+DeployTst:
+  image: gcr.io/google.com/cloudsdktool/cloud-sdk
+  stage: deploy
+  environment: $CI_COMMIT_REF_NAME
+  only:
+    - testing
+  before_script:
+    - apt install jq -y
+    - VAULT_TOKEN=$(curl -X POST -H "Content-Type:application/json" -d '{"password":"'${VAULT_PASSWORD}'"}' -sS ${VAULT_SERVER}${VAULT_API_VERS}${VAULT_PATH_LOGIN_API}${VAULT_USER} | jq ".auth.client_token" -r)
+    - URL=${VAULT_SERVER}${VAULT_API_VERS}${VAULT_PATH}/data/${ENVIRONMENT}/sa/sa-container-admin
+    - curl -H "X-Vault-Token:${VAULT_TOKEN}" -X GET -sS ${URL} | jq ".data.data.file" -r | base64 -d > sa.json
+    - SA=`cat sa.json | jq -r '.client_email'`
+    - gcloud auth activate-service-account $SA --key-file=sa.json
+    - gcloud container clusters get-credentials ${K8_CLUSTER_NAME} --region ${K8_CLUSTER_REGION} --project ${GCP_PROJECT_ID}
+    - kubectl cluster-info
+  script:
+    - NAME_SPACE=bl-payment
+    - sed -i 's/CHANGENS/'"${NAME_SPACE}"'/g' k8s/namespace.json
+    - sed -i 's/CHANGEME/'"gcr.io\/"${GCP_PROJECT_ID}"\/${CI_PROJECT_NAME}:${CI_COMMIT_SHORT_SHA}"'/g' k8s/bl-payment.yaml
+    - kubectl apply --namespace=$NAME_SPACE -f k8s/namespace.json 
+    - kubectl apply --namespace=$NAME_SPACE -f k8s/ 
+  tags:
+    - gitlab-shared-runners
+    - docker
